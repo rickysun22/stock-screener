@@ -24,7 +24,8 @@ PROJECT_ROOT = Path(__file__).parent.resolve()
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-os.chdir(PROJECT_ROOT)
+# 注意：Streamlit Cloud 上不要 chdir，避免沙箱权限问题
+# os.chdir(PROJECT_ROOT)  # 仅本地运行时使用
 
 # ------------------------------------------------------------------
 # Streamlit 与绘图库
