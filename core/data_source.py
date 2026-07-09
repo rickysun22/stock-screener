@@ -484,6 +484,121 @@ class StockFinanceDataSource(BaseDataSource):
         return None
 
 
+class iFinDDataSource(BaseDataSource):
+    """
+    iFinD 数据源 — 通过 iFinD SDK 获取数据
+
+    支持三种模式自动切换：
+      - Native: 本地 agent_gw SDK (数据最丰富)
+      - Daimon: Daimon 环境中通过 kimi_datasource 调用
+      - Fallback: AkShare 回退 (纯本地免费)
+
+    在 Streamlit Cloud 等云端环境中，会自动回退到 AkShare。
+    """
+
+    def __init__(self):
+        self._client = None
+        self._ak_fallback = None
+        self._init_client()
+
+    def _init_client(self):
+        """初始化 iFinD 客户端，失败时回退到 AkShare"""
+        try:
+            from .ifind_sdk import iFinDClient
+            self._client = iFinDClient(auto_detect=True)
+        except Exception as e:
+            print(f"[iFinD] 初始化失败: {e}")
+            self._client = None
+
+    def get_name(self) -> str:
+        if self._client:
+            return f"iFinD ({self._client.adapter_name})"
+        return "iFinD (AkShare回退)"
+
+    def _get_ak_fallback(self):
+        if self._ak_fallback is None:
+            self._ak_fallback = AkShareDataSource()
+        return self._ak_fallback
+
+    def get_stock_list(self) -> pd.DataFrame:
+        if self._client:
+            try:
+                df = self._client.get_a_stock_list()
+                if not df.empty:
+                    # 统一列名与 AkShare 保持一致
+                    if 'ticker' in df.columns and 'stock_code' not in df.columns:
+                        df['stock_code'] = df['ticker'].apply(lambda x: str(x).split('.')[0])
+                    if 'name' in df.columns and 'stock_name' not in df.columns:
+                        df['stock_name'] = df['name']
+                    return df
+            except Exception as e:
+                print(f"[iFinD] 获取列表失败: {e}，回退到 AkShare")
+        return self._get_ak_fallback().get_stock_list()
+
+    def get_daily_kline(self, stock_code: str, start_date: str, end_date: str,
+                        adjust: str = "forward") -> pd.DataFrame:
+        if self._client:
+            try:
+                ticker = self._format_ticker(stock_code)
+                df = self._client.get_price(ticker, start_date, end_date, adjust=adjust)
+                if not df.empty and 'date' in df.columns:
+                    df['date'] = pd.to_datetime(df['date'])
+                return df
+            except Exception as e:
+                print(f"[iFinD] 获取K线失败: {e}，回退到 AkShare")
+        return self._get_ak_fallback().get_daily_kline(stock_code, start_date, end_date, adjust)
+
+    def get_stock_info(self, stock_code: str) -> Optional[Dict]:
+        if self._client:
+            try:
+                ticker = self._format_ticker(stock_code)
+                df = self._client.get_stock_info(ticker)
+                if not df.empty:
+                    row = df.iloc[0]
+                    return {col: row[col] for col in df.columns}
+            except Exception:
+                pass
+        return self._get_ak_fallback().get_stock_info(stock_code)
+
+    def get_financial_indicators(self, stock_code: str,
+                                  category: str = "profitability") -> Optional[Dict]:
+        if self._client and self._client.mode != "fallback":
+            try:
+                ticker = self._format_ticker(stock_code)
+                df = self._client.get_financial_index(ticker, category)
+                if not df.empty:
+                    row = df.iloc[0]
+                    return {col: row[col] for col in df.columns}
+            except Exception:
+                pass
+        return self._get_ak_fallback().get_financial_indicators(stock_code, category)
+
+    def get_technical_indicators(self, stock_code: str,
+                                  query_time: Optional[str] = None) -> Optional[Dict]:
+        if self._client and self._client.mode != "fallback":
+            try:
+                ticker = self._format_ticker(stock_code)
+                df = self._client.get_tech_indicators(ticker, query_time)
+                if not df.empty:
+                    row = df.iloc[0]
+                    return {col: row[col] for col in df.columns}
+            except Exception:
+                pass
+        return self._get_ak_fallback().get_technical_indicators(stock_code, query_time)
+
+    def _format_ticker(self, code: str) -> str:
+        code = str(code).strip()
+        if '.' in code:
+            return code
+        if code.startswith('6'):
+            return f"{code}.SH"
+        elif code.startswith('0') or code.startswith('3'):
+            return f"{code}.SZ"
+        elif code.startswith('8') or code.startswith('4'):
+            return f"{code}.BJ"
+        return code
+
+
 class DataSourceManager:
     """
     数据源管理器
@@ -503,6 +618,14 @@ class DataSourceManager:
         # AkShare - 总是可用
         self._sources["akshare"] = AkShareDataSource(cache_dir=self.cache_dir)
         
+        # iFinD - 尝试初始化 (优先)
+        try:
+            ifind_ds = iFinDDataSource()
+            self._sources["ifind"] = ifind_ds
+            print(f"[数据源] iFinD 已加载: {ifind_ds.get_name()}")
+        except Exception as e:
+            print(f"[数据源] iFinD 不可用: {e}")
+        
         # stock_finance_data - Daimon环境可用
         sfd = StockFinanceDataSource()
         if sfd.is_available():
@@ -514,8 +637,10 @@ class DataSourceManager:
     def _select_active(self):
         """选择活动数据源"""
         if self._preferred == "auto":
-            # 优先使用 stock_finance_data (数据更丰富)
-            if "stock_finance_data" in self._sources:
+            # 优先使用 iFinD (数据最丰富)
+            if "ifind" in self._sources:
+                self._active_source = self._sources["ifind"]
+            elif "stock_finance_data" in self._sources:
                 self._active_source = self._sources["stock_finance_data"]
             else:
                 self._active_source = self._sources["akshare"]

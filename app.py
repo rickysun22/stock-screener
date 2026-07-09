@@ -92,7 +92,7 @@ STRATEGY_OPTIONS = [
     "布林带收口",
 ]
 
-DATA_SOURCE_OPTIONS = ["AkShare", "stock_finance_data"]
+DATA_SOURCE_OPTIONS = ["iFinD", "AkShare", "stock_finance_data"]
 
 
 def init_session_state():
