@@ -188,6 +188,21 @@ class _iFinDAdapter(ABC):
 # 模式 1: iFinD Native (本地 agent_gw SDK)
 # ───────────────────────────────────────────────────────────────
 
+def _init_api_key_from_secrets():
+    """从 Streamlit secrets 或环境变量读取 API Key 并设置到环境变量"""
+    # 优先级: 环境变量 > st.secrets
+    if os.environ.get("KIMI_API_KEY"):
+        return
+    
+    try:
+        import streamlit as st
+        key = st.secrets.get("KIMI_API_KEY") or st.secrets.get("kimi_api_key")
+        if key:
+            os.environ["KIMI_API_KEY"] = key
+    except Exception:
+        pass
+
+
 class _iFinDNativeAdapter(_iFinDAdapter):
     """
     iFinD Native 适配器
@@ -197,6 +212,9 @@ class _iFinDNativeAdapter(_iFinDAdapter):
     """
     
     def __init__(self):
+        # 先从 secrets 初始化 API Key
+        _init_api_key_from_secrets()
+        
         try:
             from agent_gw import AgentGwClient, AgentGwError
             self._client_cls = AgentGwClient

@@ -1,3 +1,4 @@
+# 选股小工具依赖
 akshare>=1.15.0
 pandas>=2.0.0
 numpy>=1.24.0
@@ -9,3 +10,5 @@ plotly>=5.18.0
 schedule>=1.2.0
 tqdm>=4.65.0
 requests>=2.31.0
+flask>=2.3.0
+flask-cors>=4.0.0
